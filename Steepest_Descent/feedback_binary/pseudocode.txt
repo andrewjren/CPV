@@ -1,0 +1,38 @@
+// Print voltage to LCD
+lcd.clear();
+lcd.setCursor(0, 0);
+lcd.print((float(voltage)/1023.0) * 5.0);
+lcd.print(" V");
+
+// Move one increment in + direction and get new voltage and position
+replyData = sendCommand(portA, axis, moveRel, increment);
+moves++;
+previousVoltage = voltage;
+delay(dLay);
+voltage = readAnalog(pinCPV, iter8);
+
+// Print voltage to LCD
+lcd.clear();
+lcd.setCursor(0, 0);
+lcd.print((float(voltage)/1023.0) * 5.0);
+lcd.print(" V");
+
+
+// find gradient
+F_p0 = readAnalog(pinCPV, iter8); 
+
+// move in x-axis
+// move by stepsize * increment - stepsize is for derivative calculation
+F_p0_dx = readAnalog(pinCPV, iter8); 
+
+// move in y-axis
+// move by stepsize * increment
+F_p0_dy = readAnalog(pinCPV, iter8); 
+
+dF_dx = (F_p0_dx - F_p0)/(stepsize*increment); // increment meaning?
+dF_dy = (F_p0_dy - F_p0)/(stepsize*increment);
+
+dx = step*dF_dx/F_p0;
+dy = step*dF_dy/F_p0;
+
+// move stages by dx and dy
