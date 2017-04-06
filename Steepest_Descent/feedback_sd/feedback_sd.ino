@@ -1,11 +1,12 @@
+
+
 /*   Feedback-based tracking for prototype solar concentrator
  *    Using Zaber Binary protocol
  *   
- *   Michael Lipski
- *   AOPL
- *   Summer 2016
+ *   Andrew Ren
+ *   Adapted heavily from Michael Lipski
  *   
- *   Controls the crossed Zaber X-LRM200A linear stages.  Makes small changes in X and Y while measuring the change in voltage between movements.
+ *   Controls the crossed Zaber X-LRM200A linear stages.  Uses steepest descent to maximize voltage.
  *   Attempts to maximize the voltage tied to pinMPPT.   
  */
 
@@ -21,8 +22,8 @@
 
 #include <Adafruit_RGBLCDShield.h>
 
-#include <utility/Adafruit_MCP23017.h>
-
+//#include <utility/Adafruit_MCP23017.h>
+#include <Adafruit_MCP23017.h>
 #include <SoftwareSerial.h>
 
 //////////////////// ZABER STAGES VARIABLES  //////////////////////////////////////////////////////////
@@ -334,9 +335,7 @@ void loop()
     dx = 0;
     dy = 0;
     
-    optimize(axisX, um(increment));
-    optimize(axisY, um(increment));   
-
+    optimize(um(increment));  // changed to optimize both axis simultaenously
     if(logData == true)
     {
       String dataSD;
@@ -463,87 +462,75 @@ long sendCommand(int port, int device, int com, long data)
    }    
 }
 
-void optimize(int axis, long increment)
+void optimize(long increment)
 { 
   int moves = 0; 
+  int voltage_x1 = 0;
+  int voltage_y1 = 0;
+  int dFdx = 0;
+  int dFdy = 0;
+  long delX;
+  long delY;
+  double step = 1; // step size for relative movement increment. 
   // Get starting conditions before optimizing
   voltage = readAnalog(pinCPV, iter8); 
 
   // Print voltage to LCD
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print((float(voltage)/1023.0) * 5.0);
-  lcd.print(" V");
+  lcdPrint(voltage);
 
-  // Move one increment in + direction and get new voltage and position
-  replyData = sendCommand(portA, axis, moveRel, increment);
+  // Move one increment in +X direction and get new voltage and position
+  replyData = sendCommand(portA, axisX, moveRel, increment);
   moves++;
-  previousVoltage = voltage;
   delay(dLay);
-  voltage = readAnalog(pinCPV, iter8);
+  voltage_x1 = readAnalog(pinCPV, iter8);
+
+  // Move one increment in +Y direction and get new voltage and position
+  replyData = sendCommand(portA, axisY, moveRel, increment);
+  moves++;
+  delay(dLay);
+  voltage_y1 = readAnalog(pinCPV, iter8);
   
   // Print voltage to LCD
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print((float(voltage)/1023.0) * 5.0);
-  lcd.print(" V");
+  lcdPrint(voltage);
 
+  // slopes in each direction
+  dFdx = voltage_x1 - voltage;
+  dFdy = voltage_y1 - voltage_x1;
 
-  // find gradient
-
-  
-  /*
-  // Start optimizing along axis
-  if(voltage > previousVoltage)         
+  // stop criteria is confusing for steepest descent
+  while(dFdx > 5 || dFdy > 5) // where 5 is the tolerance of error - as tracking reaches peak, gradient should decrease to 0 in each direction
   {
-     while(voltage > previousVoltage)
-      {        
-        previousVoltage = voltage;
-        replyData = sendCommand(portA, axis, moveRel, increment);  
-        moves++;      
-        delay(dLay);
-        voltage = readAnalog(pinCPV, iter8);    
+    previousVoltage = voltage;
 
-        // Print voltage to LCD
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print((float(voltage)/1023.0) * 5.0);
-        lcd.print(" V");
-      }
-      replyData = sendCommand(portA, axis, moveRel, (-1)*increment);
-      moves++;
-   }
-   else if(voltage < previousVoltage)
-   {
-      previousVoltage = voltage;
-      replyData = sendCommand(portA, axis, moveRel, (-2)*increment);  
-      moves += 2;  
-      delay(dLay);
-      voltage = readAnalog(pinCPV, iter8); 
+    delX = dFdx * step * increment;
+    delY = dFdy * step * increment;
+    replyData = sendCommand(portA, axisX, moveRel, delX);
+    replyData = sendCommand(portA, axisY, moveRel, delY);
+    delay(dLay);
+    voltage = readAnalog(pinCPV, iter8);    
 
-       // Print voltage to LCD
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print((float(voltage)/1023.0) * 5.0);
-      lcd.print(" V");
-      
-      while(voltage > previousVoltage)
-      {
-        previousVoltage = voltage;
-        replyData = sendCommand(portA, axis, moveRel, (-1)*increment);    
-        moves++;    
-        delay(dLay);
-        voltage = readAnalog(pinCPV, iter8); 
+    // Print voltage to LCD
+    lcdPrint(voltage);
 
-        // Print voltage to LCD
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print((float(voltage)/1023.0) * 5.0);
-        lcd.print(" V");
-      }
-      replyData = sendCommand(portA, axis, moveRel, increment);
-      moves++;
-   }       
+    replyData = sendCommand(portA, axisX, moveRel, increment);
+    moves++;
+    delay(dLay);
+    voltage_x1 = readAnalog(pinCPV, iter8);
+
+    // Move one increment in +Y direction and get new voltage and position
+    replyData = sendCommand(portA, axisY, moveRel, increment);
+    moves++;
+    delay(dLay);
+    voltage_y1 = readAnalog(pinCPV, iter8);
+    
+    // Print voltage to LCD
+    lcdPrint(voltage);
+
+    // slopes in each direction
+    dFdx = voltage_x1 - voltage;
+    dFdy = voltage_y1 - voltage_x1;
+
+  }  
    
    if(axis == axisX)
    {
@@ -553,7 +540,14 @@ void optimize(int axis, long increment)
    {
      dy = increment * moves * umResolution; 
    }
-   */
+}
+
+void lcdPrint(int volt_output)
+{
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print((float(volt_output)/1023.0) * 5.0);
+  lcd.print(" V");
 }
 
 
